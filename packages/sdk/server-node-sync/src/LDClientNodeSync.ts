@@ -4,6 +4,7 @@ import { format } from 'util';
 
 import {
   BasicLogger,
+  Context,
   internal,
   LDClientImpl,
   LDContext,
@@ -17,7 +18,7 @@ import {
   TypeValidators,
 } from '@launchdarkly/js-server-sdk-common';
 
-import { LDClient } from './api/LDClient';
+import { LDClient, LDVariationFilter } from './api/LDClient';
 import { LDOptions } from './api/LDOptions';
 import { LDPlugin } from './api/LDPlugin';
 import NodePlatform from './platform/NodePlatform';
@@ -104,15 +105,45 @@ class LDClientNodeSync extends LDClientImpl implements LDClient {
     internal.safeRegisterPlugins(logger, this.environmentMetadata, this, plugins);
   }
 
+  /**
+   * Wraps an LDVariationFilter (which receives LDContext) into one that receives the
+   * internal Context type used by the evaluator.
+   */
+  private static _wrapFilter(
+    filter: LDVariationFilter | undefined,
+  ): ((ctx: any, variationId: number, index: number, value: any) => boolean) | undefined {
+    if (!filter) {
+      return undefined;
+    }
+    return (ctx: any, variationId: number, index: number, value: any) => {
+      const ldContext = Context.toLDContext(ctx);
+      if (!ldContext) {
+        return true;
+      }
+      return filter(ldContext, variationId, index, value);
+    };
+  }
+
   // Override variation to be synchronous.
   // The in-memory store callbacks execute synchronously, so we capture the
   // result directly.
-  override variation(key: string, context: LDContext, defaultValue: LDFlagValue): LDFlagValue {
+  override variation(
+    key: string,
+    context: LDContext,
+    defaultValue: LDFlagValue,
+    variationFilter?: LDVariationFilter,
+  ): LDFlagValue {
     let result: LDFlagValue = defaultValue;
     // Call the parent's private evaluation through the public async method,
     // but since the in-memory store is synchronous, the callback resolves immediately.
     // We use a synchronous capture pattern.
-    const promise = super.variation(key, context, defaultValue);
+    const promise = super.variation(
+      key,
+      context,
+      defaultValue,
+      undefined,
+      LDClientNodeSync._wrapFilter(variationFilter),
+    );
     // For in-memory stores, the promise resolves synchronously via microtask.
     // We capture the result through the then handler.
     promise.then((value) => {
@@ -125,13 +156,20 @@ class LDClientNodeSync extends LDClientImpl implements LDClient {
     key: string,
     context: LDContext,
     defaultValue: LDFlagValue,
+    variationFilter?: LDVariationFilter,
   ): LDEvaluationDetail {
     let result: LDEvaluationDetail = {
       value: defaultValue,
       variationIndex: null,
       reason: { kind: 'ERROR', errorKind: 'CLIENT_NOT_READY' },
     };
-    const promise = super.variationDetail(key, context, defaultValue);
+    const promise = super.variationDetail(
+      key,
+      context,
+      defaultValue,
+      undefined,
+      LDClientNodeSync._wrapFilter(variationFilter),
+    );
     promise.then((detail) => {
       result = detail;
     });

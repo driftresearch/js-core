@@ -11,7 +11,7 @@
  */
 import { BasicLogger, BasicLoggerOptions, LDLogger } from '@launchdarkly/js-server-sdk-common';
 
-import { LDClient } from './api/LDClient';
+import { LDClient, LDVariationFilter } from './api/LDClient';
 import { LDOptions } from './api/LDOptions';
 import LDClientNodeSync from './LDClientNodeSync';
 
@@ -20,6 +20,7 @@ export type {
   LDOptions,
   LDLogger,
   BasicLoggerOptions,
+  LDVariationFilter,
 };
 
 // Re-export common types that consumers will need.
