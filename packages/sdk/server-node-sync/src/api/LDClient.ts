@@ -18,6 +18,25 @@ import {
 type Hook = integrations.Hook;
 
 /**
+ * A function that filters whether a particular variation is allowed during evaluation.
+ * If it returns false, the variation is treated as if the target or rule did not match,
+ * and evaluation continues to the next rule. For the default rule or off variation,
+ * returning false causes the fallback value to be served instead.
+ *
+ * @param context The context being evaluated.
+ * @param variationId The variation index.
+ * @param index The variation index.
+ * @param value The variation value.
+ * @returns true if the variation is allowed, false to skip it.
+ */
+export type LDVariationFilter = (
+  context: LDContext,
+  variationId: number,
+  index: number,
+  value: LDFlagValue,
+) => boolean;
+
+/**
  * The LaunchDarkly SDK client object with synchronous variation methods.
  *
  * Create this object with {@link init}. Applications should configure the client at startup time
@@ -58,9 +77,18 @@ export interface LDClient extends EventEmitter {
    * @param context The context requesting the flag.
    * @param defaultValue The default value of the flag, to be used if the value is not available
    *   from LaunchDarkly.
+   * @param variationFilter An optional filter function. If provided, it is called with the
+   *   context, variation index, variation index, and value for each candidate variation. If it
+   *   returns false, that target or rule is skipped and evaluation continues. For the off
+   *   variation or default rule, returning false causes the fallback (defaultValue) to be served.
    * @returns The flag variation value.
    */
-  variation(key: string, context: LDContext, defaultValue: LDFlagValue): LDFlagValue;
+  variation(
+    key: string,
+    context: LDContext,
+    defaultValue: LDFlagValue,
+    variationFilter?: LDVariationFilter,
+  ): LDFlagValue;
 
   /**
    * Determines the variation of a feature flag for a context, along with information about how it
@@ -73,12 +101,17 @@ export interface LDClient extends EventEmitter {
    * @param context The context requesting the flag.
    * @param defaultValue The default value of the flag, to be used if the value is not available
    *   from LaunchDarkly.
+   * @param variationFilter An optional filter function. If provided, it is called with the
+   *   context, variation index, variation index, and value for each candidate variation. If it
+   *   returns false, that target or rule is skipped and evaluation continues. For the off
+   *   variation or default rule, returning false causes the fallback (defaultValue) to be served.
    * @returns The evaluation detail.
    */
   variationDetail(
     key: string,
     context: LDContext,
     defaultValue: LDFlagValue,
+    variationFilter?: LDVariationFilter,
   ): LDEvaluationDetail;
 
   /**

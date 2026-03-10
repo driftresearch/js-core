@@ -700,6 +700,12 @@ export default class LDClientImpl implements LDClient {
     context: LDContext,
     defaultValue: any,
     callback?: (err: any, res: any) => void,
+    variationFilter?: (
+      context: any,
+      variationId: number,
+      index: number,
+      value: any,
+    ) => boolean,
   ): Promise<any> {
     return this._hookRunner
       .withEvaluationSeries(
@@ -717,6 +723,8 @@ export default class LDClientImpl implements LDClient {
               (res) => {
                 resolve(res.detail);
               },
+              undefined,
+              variationFilter,
             );
           }),
         this._featureStore.getInitMetaData?.()?.environmentId,
@@ -732,6 +740,12 @@ export default class LDClientImpl implements LDClient {
     context: LDContext,
     defaultValue: any,
     callback?: (err: any, res: LDEvaluationDetail) => void,
+    variationFilter?: (
+      context: any,
+      variationId: number,
+      index: number,
+      value: any,
+    ) => boolean,
   ): Promise<LDEvaluationDetail> {
     return this._hookRunner.withEvaluationSeries(
       key,
@@ -749,6 +763,8 @@ export default class LDClientImpl implements LDClient {
               resolve(res.detail);
               callback?.(null, res.detail);
             },
+            undefined,
+            variationFilter,
           );
         }),
       this._featureStore.getInitMetaData?.()?.environmentId,
@@ -1169,6 +1185,12 @@ export default class LDClientImpl implements LDClient {
     eventFactory: EventFactory,
     cb: (res: EvalResult, flag?: Flag) => void,
     typeChecker?: (value: any) => [boolean, string],
+    variationFilter?: (
+      context: any,
+      variationId: number,
+      index: number,
+      value: any,
+    ) => boolean,
   ): void {
     if (this._config.offline) {
       this._logger?.info('Variation called in offline mode. Returning default value.');
@@ -1230,6 +1252,7 @@ export default class LDClientImpl implements LDClient {
           cb(evalRes, flag);
         },
         eventFactory,
+        variationFilter,
       );
     });
   }
@@ -1256,6 +1279,12 @@ export default class LDClientImpl implements LDClient {
     eventFactory: EventFactory,
     cb: (res: EvalResult, flag?: Flag) => void,
     typeChecker?: (value: any) => [boolean, string],
+    variationFilter?: (
+      context: any,
+      variationId: number,
+      index: number,
+      value: any,
+    ) => boolean,
   ): void {
     if (!this.initialized()) {
       this._featureStore.initialized((storeInitialized) => {
@@ -1264,7 +1293,15 @@ export default class LDClientImpl implements LDClient {
             'Variation called before LaunchDarkly client initialization completed' +
               " (did you wait for the 'ready' event?) - using last known values from feature store",
           );
-          this._variationInternal(flagKey, context, defaultValue, eventFactory, cb, typeChecker);
+          this._variationInternal(
+            flagKey,
+            context,
+            defaultValue,
+            eventFactory,
+            cb,
+            typeChecker,
+            variationFilter,
+          );
           return;
         }
         this._logger?.warn(
@@ -1275,7 +1312,15 @@ export default class LDClientImpl implements LDClient {
       });
       return;
     }
-    this._variationInternal(flagKey, context, defaultValue, eventFactory, cb, typeChecker);
+    this._variationInternal(
+      flagKey,
+      context,
+      defaultValue,
+      eventFactory,
+      cb,
+      typeChecker,
+      variationFilter,
+    );
   }
 
   private _dataSourceErrorHandler(e: any) {

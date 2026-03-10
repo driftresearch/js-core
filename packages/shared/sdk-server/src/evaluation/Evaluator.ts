@@ -14,12 +14,13 @@ import { Segment } from './data/Segment';
 import { SegmentRule } from './data/SegmentRule';
 import { VariationOrRollout } from './data/VariationOrRollout';
 import EvalResult from './EvalResult';
-import evalTargets from './evalTargets';
+import evalTargets, { evalTargetsWithFilter } from './evalTargets';
 import makeBigSegmentRef from './makeBigSegmentRef';
 import matchClauseWithoutSegmentOperations, { maybeNegate } from './matchClause';
 import matchSegmentTargets from './matchSegmentTargets';
 import { Queries } from './Queries';
 import Reasons from './Reasons';
+import { VariationFilter } from './VariationFilter';
 import { getBucketBy, getOffVariation, getVariation } from './variations';
 
 const { ErrorKinds } = internal;
@@ -115,9 +116,14 @@ export default class Evaluator {
     this._bucketer = new Bucketer(platform.crypto);
   }
 
-  async evaluate(flag: Flag, context: Context, eventFactory?: EventFactory): Promise<EvalResult> {
+  async evaluate(
+    flag: Flag,
+    context: Context,
+    eventFactory?: EventFactory,
+    variationFilter?: VariationFilter,
+  ): Promise<EvalResult> {
     return new Promise<EvalResult>((resolve) => {
-      this.evaluateCb(flag, context, resolve, eventFactory);
+      this.evaluateCb(flag, context, resolve, eventFactory, variationFilter);
     });
   }
 
@@ -126,6 +132,7 @@ export default class Evaluator {
     context: Context,
     cb: (res: EvalResult) => void,
     eventFactory?: EventFactory,
+    variationFilter?: VariationFilter,
   ) {
     const state: EvalState = {};
     this._evaluateInternal(
@@ -148,6 +155,7 @@ export default class Evaluator {
       },
       true,
       eventFactory,
+      variationFilter,
     );
   }
 
@@ -171,9 +179,19 @@ export default class Evaluator {
     cb: (res: EvalResult) => void,
     topLevel: boolean,
     eventFactory?: EventFactory,
+    variationFilter?: VariationFilter,
   ): void {
     if (!flag.on) {
-      cb(getOffVariation(flag, Reasons.Off));
+      const offResult = getOffVariation(flag, Reasons.Off);
+      if (variationFilter && !offResult.isError && offResult.detail.variationIndex != null) {
+        const idx = offResult.detail.variationIndex;
+        if (!variationFilter(context, idx, idx, offResult.detail.value)) {
+          // Off variation was filtered out — return null value so fallback is used.
+          cb(EvalResult.forSuccess(null, Reasons.Off));
+          return;
+        }
+      }
+      cb(offResult);
       return;
     }
 
@@ -190,20 +208,46 @@ export default class Evaluator {
           return;
         }
 
-        const targetRes = evalTargets(flag, context);
+        const targetRes = variationFilter
+          ? evalTargetsWithFilter(flag, context, variationFilter)
+          : evalTargets(flag, context);
         if (targetRes) {
           cb(targetRes);
           return;
         }
 
-        this._evaluateRules(flag, context, state, (evalRes) => {
-          if (evalRes) {
-            cb(evalRes);
-            return;
-          }
+        this._evaluateRules(
+          flag,
+          context,
+          state,
+          (evalRes) => {
+            if (evalRes) {
+              cb(evalRes);
+              return;
+            }
 
-          cb(this._variationForContext(flag.fallthrough, context, flag, Reasons.Fallthrough));
-        });
+            const fallthroughRes = this._variationForContext(
+              flag.fallthrough,
+              context,
+              flag,
+              Reasons.Fallthrough,
+            );
+            if (
+              variationFilter &&
+              !fallthroughRes.isError &&
+              fallthroughRes.detail.variationIndex != null
+            ) {
+              const idx = fallthroughRes.detail.variationIndex;
+              if (!variationFilter(context, idx, idx, fallthroughRes.detail.value)) {
+                // Fallthrough variation was filtered out — return null value so fallback is used.
+                cb(EvalResult.forSuccess(null, Reasons.Fallthrough));
+                return;
+              }
+            }
+            cb(fallthroughRes);
+          },
+          variationFilter,
+        );
       },
       topLevel,
       eventFactory,
@@ -316,6 +360,7 @@ export default class Evaluator {
     context: Context,
     state: EvalState,
     cb: (res: EvalResult | undefined) => void,
+    variationFilter?: VariationFilter,
   ): void {
     let ruleResult: EvalResult | undefined;
 
@@ -323,6 +368,14 @@ export default class Evaluator {
       flag.rules,
       (rule, ruleIndex, iterCb: (res: boolean) => void) => {
         this._ruleMatchContext(flag, rule, ruleIndex, context, state, [], (res) => {
+          if (res && variationFilter && !res.isError && res.detail.variationIndex != null) {
+            const idx = res.detail.variationIndex;
+            if (!variationFilter(context, idx, idx, res.detail.value)) {
+              // Rule variation was filtered out — treat as if the rule didn't match.
+              iterCb(false);
+              return;
+            }
+          }
           ruleResult = res;
           iterCb(!!res);
         });
